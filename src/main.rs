@@ -36,7 +36,7 @@ fn main() {
         }
     };
 
-    if let Err(e) = stream.write_all(b"HELLO\n") {
+    if let Err(e) = stream.write_all(b"NETREQ target=example.com port=443\n") {
         eprintln!("error: failed to send request: {e}");
         std::process::exit(1);
     }
@@ -59,8 +59,8 @@ fn main() {
         }
     }
 
-    let id = match parse_ok_id(&response) {
-        Ok(id) => id,
+    let (id, target, port) = match parse_ok_id(&response) {
+        Ok(result) => result,
         Err(msg) => {
             eprintln!("error: {msg}");
             std::process::exit(1);
@@ -69,18 +69,51 @@ fn main() {
 
     print!("raw: {response}");
     println!("id: {id}");
+    println!("target: {target}");
+    println!("port: {port}");
 }
 
 fn print_usage() {
     println!("Usage: wynd [--help] [--version]");
 }
 
-fn parse_ok_id(line: &str) -> Result<u64, String> {
+fn parse_ok_id(line: &str) -> Result<(u64, String, u16), String> {
     let trimmed = line.trim_end_matches(['\r', '\n']);
-    let prefix = "OK id=";
+    let prefix = "OK ";
     let rest = trimmed
         .strip_prefix(prefix)
         .ok_or_else(|| format!("unexpected response: {trimmed}"))?;
-    rest.parse::<u64>()
-        .map_err(|_| format!("invalid id in response: {trimmed}"))
+
+    let mut id_val = None;
+    let mut target_val = None;
+    let mut port_val = None;
+
+    for part in rest.split(' ') {
+        if let Some((key, val)) = part.split_once('=') {
+            match key {
+                "id" => {
+                    id_val = Some(
+                        val.parse::<u64>()
+                        .map_err(|_| format!("invalid id: {val}"))?,
+                    );
+                }
+                "target" => {
+                    target_val = Some(val.to_string());
+                }
+                "port" => {
+                    port_val = Some(
+                        val.parse::<u16>()
+                        .map_err(|_| format!("invalid port: {val}"))?,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let id = id_val.ok_or("missing id")?;
+    let target = target_val.ok_or("missing target")?;
+    let port = port_val.ok_or("missing port")?;
+
+    Ok((id, target, port))
 }
