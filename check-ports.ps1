@@ -1,0 +1,1 @@
+ssh -i "C:\Users\harsh\Downloads\ssh-key-2026-04-22.key" -o ConnectTimeout=10 ubuntu@161.118.177.7 "ss -tlnp | grep -E '443|53|992|444|openvpn'"

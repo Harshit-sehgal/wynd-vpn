@@ -1,0 +1,1 @@
+Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `'$env:USERPROFILE\Downloads\openvpn-connect-3.8.0.4528_signed.msi`' /qn /L*V `$env:TEMP\openvpn-install.log"

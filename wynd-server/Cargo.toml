@@ -2,11 +2,6 @@
 name = "wynd-server"
 version = "0.1.0"
 edition = "2021"
-authors = ["WYND"]
-
-[[bin]]
-name = "wynd-server"
-path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

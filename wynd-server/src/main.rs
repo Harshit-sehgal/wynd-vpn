@@ -1,6 +1,5 @@
-//! WYND Tunnel Server - Simple TCP VPN
+//! WYND VPN Server - TCP tunnel for bypassing network restrictions
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use anyhow::Result;
@@ -8,54 +7,35 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
-const PORT: u16 = 9000;
+const PORT: u16 = 53;
 const MAX_PACKET: usize = 65535;
 
-struct State {
-    clients: u32,
-    stats: HashMap<u32, ClientStats>,
-}
-
-#[derive(Default)]
-struct ClientStats {
-    packets_in: u64,
-    packets_out: u64,
-    bytes_in: u64,
-    bytes_out: u64,
+struct ServerState {
+    connections: u32,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("==========================================");
-    println!("WYND Server v0.1.0");
-    println!("==========================================");
-    println!("Listening on TCP :{}", PORT);
-    println!("==========================================");
+    println!("WYND Server v0.1.0 - TCP {}", PORT);
     
     let listener = TcpListener::bind(format!("0.0.0.0:{}", PORT)).await?;
-    println!("Ready! Waiting for connections...");
+    println!("Listening on port {}", PORT);
     
-    let state = Arc::new(RwLock::new(State::new()));
+    let state = Arc::new(RwLock::new(ServerState { connections: 0 }));
     
     loop {
         let (socket, addr) = listener.accept().await?;
         println!("Connection from {}", addr);
         
         let state = Arc::clone(&state);
-        tokio::spawn(handle(socket, addr, state));
+        tokio::spawn(handle_connection(socket, addr, state));
     }
 }
 
-impl State {
-    fn new() -> Self {
-        Self { clients: 0, stats: HashMap::new() }
-    }
-}
-
-async fn handle(mut socket: TcpStream, addr: SocketAddr, state: Arc<RwLock<State>>) {
+async fn handle_connection(mut socket: TcpStream, addr: SocketAddr, state: Arc<RwLock<ServerState>>) {
     let mut buf = [0u8; MAX_PACKET];
     
-    // Handshake - read "HELLO"
+    // Handshake
     let n = match socket.read(&mut buf).await {
         Ok(n) if n > 0 => n,
         _ => return,
@@ -71,40 +51,20 @@ async fn handle(mut socket: TcpStream, addr: SocketAddr, state: Arc<RwLock<State
     
     let id = {
         let mut s = state.write().await;
-        s.clients += 1;
-        s.clients
+        s.connections += 1;
+        s.connections
     };
     
+    let _ = socket.write_all(format!("OK:{}\n", id).as_bytes()).await;
     println!("Client {} connected", id);
     
-    let _ = socket.write_all(format!("OK:{}\n", id).as_bytes()).await;
-    
-    // Main loop - echo packets for testing
-    // Real server would forward to internet here
+    // Echo loop
     loop {
         match socket.read(&mut buf).await {
             Ok(0) => break,
             Ok(n) => {
-                // Update stats
-                {
-                    let mut s = state.write().await;
-                    if let Some(stats) = s.stats.get_mut(&id) {
-                        stats.packets_in += 1;
-                        stats.bytes_in += n as u64;
-                    }
-                }
-                
-                // Echo back for testing
                 if socket.write_all(&buf[..n]).await.is_err() {
                     break;
-                }
-                
-                {
-                    let mut s = state.write().await;
-                    if let Some(stats) = s.stats.get_mut(&id) {
-                        stats.packets_out += 1;
-                        stats.bytes_out += n as u64;
-                    }
                 }
             }
             Err(_) => break,

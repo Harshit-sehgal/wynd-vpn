@@ -1,1 +1,0 @@
-C:\Users\harsh\OneDrive\Desktop\wyndvpn\target\debug\wynd.exe: C:\Users\harsh\OneDrive\Desktop\wyndvpn\src\core\config.rs C:\Users\harsh\OneDrive\Desktop\wyndvpn\src\core\logger.rs C:\Users\harsh\OneDrive\Desktop\wyndvpn\src\core\mod.rs C:\Users\harsh\OneDrive\Desktop\wyndvpn\src\main.rs
