@@ -1,116 +1,44 @@
-# WYND VPN
+# WYND VPN (v2)
 
-A multi-protocol VPN system for connecting through restricted networks like hostels and corporate WiFi.
+WYND is a custom VPN solution designed specifically to bypass highly restricted WiFi networks (hostels, corporate environments, cafes) by tunneling all traffic over a single TCP connection on Port 53.
+
+**Note:** This repository is currently transitioning from a legacy SoftEther/WireGuard setup (v1) to a custom-built Rust/Android architecture (v2).
 
 ## Features
 
-- SoftEther VPN on TCP 53 (works where other VPNs don't)
-- Multiple fallback ports (443, 992, 5555)
-- WireGuard UDP 443 support
-- Web control panel at http://harshitsehgal.online
-- Automatic protocol detection
+- **Port 53 Penetration:** Uses TCP port 53 (DNS), which is almost universally left open on restricted captive portals.
+- **Custom Protocol:** A lightweight, low-overhead framing protocol designed specifically for TCP streams.
+- **Android First:** Includes a native Android client using `VpnService` for one-tap connection without complex configurations.
 
-## Quick Start
+## Architecture & Documentation
 
-### SoftEther (Recommended)
+Please refer to the following documents in the `docs/` folder for detailed technical information:
+- [`ARCHITECTURE.md`](docs/ARCHITECTURE.md): System design, components, and trade-offs.
+- [`TCP53_PROTOCOL.md`](docs/TCP53_PROTOCOL.md): Custom stream framing protocol specification.
+- [`PROJECT_INFO.md`](docs/PROJECT_INFO.md): Legacy (v1) project setup, infrastructure, and server credentials.
 
-Host: `161.118.177.7:53`
-Hub: `WYND`
-User: `wynduser`
-Pass: `wyndpass123`
-
-Download: SoftEther VPN Client (Android/Windows) or OpenVPN compatible clients
-
-### WireGuard
-
-Port: UDP 443
-Network: 10.66.66.0/24
-
-### Web Panel
-
-View active connections and get setup instructions:
-http://harshitsehgal.online
-
-## Why TCP 53?
-
-Most restrictive networks block everything except DNS (port 53):
-- DNS is essential for network operation
-- Rarely blocked by network admins
-- TCP provides reliable delivery
-- Works on hostels, airports, corporate networks
-
-## Architecture
+## Repository Structure
 
 ```
-Oracle Cloud VM (161.118.177.7)
-├── SoftEther (TCP 53, 443, 992, 5555)
-├── WireGuard (UDP 443)
-├── Web Panel (FastAPI)
-└── Nginx Reverse Proxy
+├── clients/          # Native clients (Android, etc.)
+│   └── android/      # WYND v2 Android Client
+├── docs/             # Technical documentation
+├── infra/            # Legacy infrastructure config and certs
+├── legacy/           # Old v1 web panel and SoftEther scripts
+├── server/           # Backend server implementations
+│   └── wynd-tcp53d/  # Rust daemon handling the custom TCP-53 protocol
+└── tests/            # Connectivity test scripts
 ```
 
-## Project Structure
+## Legacy Services (v1)
 
-```
-wynd-server/           Rust TCP tunnel server
-wynd-client/python/    Python client implementation
-index.html            Web UI
-main.py               FastAPI backend
-```
+The legacy infrastructure (SoftEther on TCP 53/443/5555 and WireGuard on UDP 443) remains operational during the v2 transition. See `docs/PROJECT_INFO.md` for connection details to the legacy server.
 
-## Services
+## Current Development Phase
 
-| Service | Port | Protocol | Status |
-|---------|------|----------|--------|
-| SoftEther | 53 | TCP | ✓ |
-| SoftEther | 443 | TCP | ✓ |
-| SoftEther | 992 | TCP | ✓ |
-| SoftEther | 5555 | TCP | ✓ |
-| WireGuard | 443 | UDP | ✓ |
-| Web Panel | 8080 | HTTP | ✓ |
-
-## Development
-
-Build the Rust server:
-
-```bash
-cd wynd-server
-cargo run
-```
-
-Run the Python client:
-
-```bash
-cd wynd-client/python
-python3 client.py
-```
-
-Test connectivity:
-
-```bash
-python3 test-server.py
-```
-
-## Server Info
-
-SSH: `ubuntu@161.118.177.7`
-Domain: `harshitsehgal.online`
-OS: Ubuntu 22.04 LTS
-
-## Troubleshooting
-
-**Can't connect to port 53?**
-Try ports 443, 992, or 5555
-
-**Web panel not loading?**
-Check: `curl http://161.118.177.7`
-
-**WireGuard connection issues?**
-Verify firewall allows UDP 443
-
-## Documentation
-
-See `PROJECT_INFO.md` for detailed setup and architecture documentation.
+We are currently building **Phase 1 & Phase 2** of the new architecture:
+1. Building the `wynd-tcp53d` server in Rust (currently testing on port 9000).
+2. Developing the Android MVP to interface with the new server protocol.
 
 ## License
 
