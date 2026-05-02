@@ -5,7 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, warn};
 
-const LISTEN_PORT: u16 = 9000;
+const LISTEN_PORT: u16 = 53;
 const MAX_PAYLOAD_SIZE: usize = 65535;
 
 #[tokio::main]
