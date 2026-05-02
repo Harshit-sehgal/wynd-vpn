@@ -1,6 +1,23 @@
 # WYND VPN - Complete Project Documentation
 
-## PROJECT OVERVIEW
+## IMPORTANT UPDATE (May 2026) - WYND v2
+
+The WYND v2 custom VPN is now **deployed and running**!
+
+### v2 Status
+- **Rust Server:** Running on Oracle VM (161.118.177.7:53)
+- **Protocol:** Custom TCP framing protocol (2-byte length header)
+- **Testing:** All 6 tests passed
+- **Clients:** Android (code ready), Desktop (test mode)
+
+### Connection Details for v2
+- Server: `161.118.177.7`
+- Port: `53` (TCP)
+- Protocol: Custom WYND framing (see docs/TCP53_PROTOCOL.md)
+
+---
+
+## PROJECT OVERVIEW (v1)
 
 ### What Are We Building?
 
