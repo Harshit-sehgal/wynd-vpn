@@ -4,7 +4,7 @@ import time
 import sys
 
 SERVER_IP = "127.0.0.0" if len(sys.argv) < 2 else sys.argv[1]
-SERVER_PORT = 9000
+SERVER_PORT = 53 if len(sys.argv) < 3 else int(sys.argv[2])
 
 def test_protocol():
     print(f"Connecting to {SERVER_IP}:{SERVER_PORT}...")
