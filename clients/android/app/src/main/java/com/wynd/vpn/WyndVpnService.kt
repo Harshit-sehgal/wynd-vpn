@@ -18,8 +18,8 @@ class WyndVpnService : VpnService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     companion object {
-        private const val SERVER_HOST = "161.118.177.7"  // TODO: Make configurable
-        private const val SERVER_PORT = 9000  // Dev port - switch to 53 in Phase 3
+        private const val SERVER_HOST = "161.118.177.7"
+        private const val SERVER_PORT = 53  // Production port
         private const val MTU = 1500
     }
 

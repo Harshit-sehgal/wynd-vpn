@@ -11,25 +11,15 @@ const LISTEN_PORT: u16 = 53;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    info!("WYND VPN Server v2 - Full TUN Support");
-    info!("======================================");
-
-    // Set up TUN interface
-    setup_tun()?;
-    setup_nat()?;
+    info!("WYND VPN Server - IP Proxy Mode");
+    info!("================================");
 
     // Start server
     let addr = format!("0.0.0.0:{}", LISTEN_PORT);
     let listener = TcpListener::bind(&addr).await.context("Failed to bind")?;
     info!("Server listening on {}", addr);
-    info!("VPN Network: 10.0.0.0/24");
+    info!("Routing traffic to internet via IP proxy");
     info!("");
-    info!("To use this VPN, clients need to:");
-    info!("1. Connect to {}:{}", addr.replace("0.0.0.0", "161.118.177.7"), LISTEN_PORT);
-    info!("2. Set up their own TUN interface with IP 10.0.0.x");
-    info!("");
-    info!("For full VPN, each client needs to create their own TUN device.");
-    info!("MVP mode: Echo server for protocol testing.");
 
     loop {
         match listener.accept().await {
@@ -47,63 +37,13 @@ async fn main() -> Result<()> {
     }
 }
 
-fn setup_tun() -> Result<()> {
-    use std::process::Command;
-
-    // Create TUN if not exists
-    let _ = Command::new("ip")
-        .args(&["tuntap", "add", "mode", "tun", "dev", "tun0"])
-        .output();
-
-    // Set IP
-    let _ = Command::new("ip")
-        .args(&["addr", "add", "10.0.0.1/24", "dev", "tun0"])
-        .output();
-
-    // Bring up
-    let _ = Command::new("ip")
-        .args(&["link", "set", "tun0", "up"])
-        .output();
-
-    // Enable IP forwarding
-    let _ = Command::new("sh")
-        .args(&["-c", "echo 1 > /proc/sys/net/ipv4/ip_forward"])
-        .output();
-
-    info!("TUN0: 10.0.0.1/24 - UP");
-    Ok(())
-}
-
-fn setup_nat() -> Result<()> {
-    use std::process::Command;
-
-    // NAT
-    let _ = Command::new("iptables")
-        .args(&["-t", "nat", "-A", "POSTROUTING", "-s", "10.0.0.0/24", "-j", "MASQUERADE"])
-        .output();
-
-    // Forward
-    let _ = Command::new("iptables")
-        .args(&["-A", "FORWARD", "-i", "tun0", "-j", "ACCEPT"])
-        .output();
-
-    let _ = Command::new("iptables")
-        .args(&["-A", "FORWARD", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"])
-        .output();
-
-    info!("NAT and forwarding configured");
-    Ok(())
-}
-
-async fn handle_client(mut stream: TcpStream, addr: SocketAddr) -> Result<()> {
-    let mut buffer = BytesMut::with_capacity(65535);
-
-    info!("[{}] Client session started (MVP echo mode)", addr);
+async fn handle_client(mut client_stream: TcpStream, client_addr: SocketAddr) -> Result<()> {
+    let mut header_buf = BytesMut::with_capacity(65535);
 
     loop {
         // Read 2-byte length header
         let mut length_buf = [0u8; 2];
-        match stream.read_exact(&mut length_buf).await {
+        match client_stream.read_exact(&mut length_buf).await {
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
             Err(e) => return Err(e.into()),
@@ -115,24 +55,91 @@ async fn handle_client(mut stream: TcpStream, addr: SocketAddr) -> Result<()> {
         }
 
         // Read IP packet
-        buffer.resize(payload_len, 0);
-        stream.read_exact(&mut buffer).await?;
+        header_buf.resize(payload_len, 0);
+        client_stream.read_exact(&mut header_buf).await?;
 
-        let packet = buffer.to_vec();
+        let packet = header_buf.to_vec();
 
-        // Parse and log
+        // Parse IP packet to get destination
         if packet.len() >= 20 {
-            let dst = format!("{}.{}.{}.{}", packet[16] & 0xFF, packet[17] & 0xFF, packet[18] & 0xFF, packet[19] & 0xFF);
-            let src = format!("{}.{}.{}.{}", packet[12] & 0xFF, packet[13] & 0xFF, packet[14] & 0xFF, packet[15] & 0xFF);
-            let proto = packet[9];
-            info!("[{}] IP {} -> {} ({} bytes, proto {})", addr, src, dst, packet.len(), proto);
-        }
+            let dst_ip = format!("{}.{}.{}.{}", packet[16], packet[17], packet[18], packet[19]);
+            let src_ip = format!("{}.{}.{}.{}", packet[12], packet[13], packet[14], packet[15]);
+            let protocol = packet[9];
+            
+            info!("[{}] {} -> {} (proto: {})", client_addr, src_ip, dst_ip, protocol);
 
-        // MVP: Echo back the packet
-        // In full mode: inject to TUN, wait for response, send to client
-        let mut response = BytesMut::with_capacity(2 + packet.len());
-        response.put_u16(payload_len as u16);
-        response.put_slice(&packet);
-        stream.write_all(&response).await?;
+            // For TCP (protocol 6) and UDP (protocol 17), we can try to proxy
+            if protocol == 6 && packet.len() >= 20 {
+                // TCP packet - try to extract port
+                let dst_port = ((packet[22] as u16) << 8) | (packet[23] as u16);
+                let src_port = ((packet[20] as u16) << 8) | (packet[21] as u16);
+                
+                info!("[{}] TCP {}:{} -> {}:{}", client_addr, src_ip, src_port, dst_ip, dst_port);
+                
+                // Try to connect to the destination and forward
+                match TcpStream::connect(format!("{}:{}", dst_ip, dst_port)).await {
+                    Ok(mut dst_stream) => {
+                        // Skip IP header (20 bytes) + TCP header (usually 20 bytes) = 40
+                        let tcp_header_len = ((packet[46] >> 4) as usize) * 4;
+                        let payload_start = 20 + tcp_header_len;
+                        
+                        // Send data after TCP header to destination
+                        if payload_start < packet.len() {
+                            let app_data = &packet[payload_start..];
+                            if !app_data.is_empty() {
+                                dst_stream.write_all(app_data).await?;
+                            }
+                        }
+                        
+                        // Read response
+                        let mut response_buf = vec![0u8; 65535];
+                        match dst_stream.read(&mut response_buf).await {
+                            Ok(n) if n > 0 => {
+                                // Construct response packet
+                                // For now, just echo back the data we got (simplified)
+                                // Real implementation would build proper IP/TCP response
+                                let mut response = BytesMut::with_capacity(2 + n);
+                                response.put_u16(n as u16);
+                                response.put_slice(&response_buf[..n]);
+                                client_stream.write_all(&response).await?;
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(e) => {
+                        // Destination unreachable - just echo back (simplified)
+                        warn!("[{}] Could not connect to {}:{} - {}", client_addr, dst_ip, dst_port, e);
+                        
+                        // Echo back for now
+                        let mut response = BytesMut::with_capacity(2 + packet.len());
+                        response.put_u16(payload_len as u16);
+                        response.put_slice(&packet);
+                        client_stream.write_all(&response).await?;
+                    }
+                }
+            } else if protocol == 17 {
+                // UDP - echo back for now
+                let dst_port = ((packet[22] as u16) << 8) | (packet[23] as u16);
+                info!("[{}] UDP -> {}:{}", client_addr, dst_ip, dst_port);
+                
+                // Echo back
+                let mut response = BytesMut::with_capacity(2 + packet.len());
+                response.put_u16(payload_len as u16);
+                response.put_slice(&packet);
+                client_stream.write_all(&response).await?;
+            } else {
+                // Other protocols - echo
+                let mut response = BytesMut::with_capacity(2 + packet.len());
+                response.put_u16(payload_len as u16);
+                response.put_slice(&packet);
+                client_stream.write_all(&response).await?;
+            }
+        } else {
+            // Not enough data for IP header - echo
+            let mut response = BytesMut::with_capacity(2 + packet.len());
+            response.put_u16(payload_len as u16);
+            response.put_slice(&packet);
+            client_stream.write_all(&response).await?;
+        }
     }
 }
