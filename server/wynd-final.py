@@ -9,29 +9,44 @@ import sys
 import os
 
 PORT = 53
-LOG = open("/tmp/wynd-final.log", "a")
 
 def log(msg):
-    LOG.write(msg + "\n")
-    LOG.flush()
     print(msg)
 
 def handle_client(client_sock, client_addr):
     log(f"[{client_addr}] Connected")
     
     try:
+        # Set timeout
+        client_sock.settimeout(30)
         header = client_sock.recv(2)
-        if not header:
-            return
-            
+        log(f"[{client_addr}] Got header: {header}")
+        
         length = struct.unpack('!H', header)[0]
         
         if length > 1024 or length == 0:
             return
             
         data = client_sock.recv(length)
+        log(f"[{client_addr}] Got data: {data}")
         if not data:
             return
+        
+        # Handle INIT handshake
+        if data == b'INIT':
+            log(f"[{client_addr}] INIT OK, waiting for connect...")
+            # Send response WITHOUT length prefix (keep simple)
+            client_sock.sendall(b'\x00')
+            log(f"[{client_addr}] Sent INIT response, waiting for connect request...")
+            # Wait for actual connect
+            header = client_sock.recv(2)
+            log(f"[{client_addr}] Got header: {header}")
+            length = struct.unpack('!H', header)[0]
+            log(f"[{client_addr}] Expecting {length} bytes")
+            if length > 1024 or length == 0:
+                return
+            data = client_sock.recv(length)
+            log(f"[{client_addr}] Got connect data: {data}")
         
         if len(data) >= 7:
             addr_type = data[0]
@@ -47,12 +62,12 @@ def handle_client(client_sock, client_addr):
                     real_sock.connect((ip, port))
                     log(f"[{client_addr}] Connected to {ip}:{port}")
                     
-                    # Success
-                    client_sock.sendall(struct.pack('!H', 1) + b'\x00')
+                    # Success - send without length prefix
+                    client_sock.sendall(b'\x00')
                     
                     log(f"[{client_addr}] Forwarding data...")
                     
-                    def forward(src, dst):
+                    def forward_client_to_server(src, dst):
                         try:
                             while True:
                                 d = src.recv(4096)
@@ -62,8 +77,18 @@ def handle_client(client_sock, client_addr):
                         except Exception as e:
                             log(f"[{client_addr}] Forward error: {e}")
                     
-                    t1 = threading.Thread(target=forward, args=(client_sock, real_sock))
-                    t2 = threading.Thread(target=forward, args=(real_sock, client_sock))
+                    def forward_server_to_client(src, dst):
+                        try:
+                            while True:
+                                d = src.recv(4096)
+                                if not d:
+                                    break
+                                dst.sendall(struct.pack('!H', len(d)) + d)
+                        except Exception as e:
+                            log(f"[{client_addr}] Forward error: {e}")
+                    
+                    t1 = threading.Thread(target=forward_client_to_server, args=(client_sock, real_sock))
+                    t2 = threading.Thread(target=forward_server_to_client, args=(real_sock, client_sock))
                     t1.start()
                     t2.start()
                     t1.join()
@@ -71,7 +96,7 @@ def handle_client(client_sock, client_addr):
                     
                 except Exception as e:
                     log(f"[{client_addr}] Failed: {e}")
-                    client_sock.sendall(struct.pack('!H', 1) + b'\x01')
+                    client_sock.sendall(b'\x01')
                     
     except Exception as e:
         log(f"[{client_addr}] Error: {e}")

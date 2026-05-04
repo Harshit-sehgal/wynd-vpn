@@ -21,6 +21,7 @@ class WYNDProxy:
     def connect(self):
         print(f"Connecting to WYND server {SERVER_HOST}:{SERVER_PORT}...")
         self.server_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_conn.settimeout(30)
         self.server_conn.connect((SERVER_HOST, SERVER_PORT))
         
         # Handshake
@@ -40,13 +41,18 @@ class WYNDProxy:
                 target_host = host_port[0]
                 target_port = int(host_port[1]) if len(host_port) > 1 else 80
                 
-                # Forward to WYND server
-                request = f"CONNECT {target_host}:{target_port}".encode()
+                # Resolve hostname to IP
+                resolved_ip = socket.gethostbyname(target_host)
+                print(f"Resolved {target_host} -> {resolved_ip}")
+                
+                # Send IP-based format: [1][IP1][IP2][IP3][IP4][port_hi][port_lo]
+                ip_bytes = bytes(map(int, resolved_ip.split('.')))
+                request = b'\x01' + ip_bytes + struct.pack('!H', target_port)
                 self.server_conn.sendall(struct.pack('!H', len(request)) + request)
                 
                 # Get response
-                resp = self.server_conn.recv(2)
-                if struct.unpack('!H', resp)[0] > 0:
+                resp = self.server_conn.recv(1)
+                if resp == b'\x00':
                     # Success
                     client_sock.send(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                     
@@ -54,14 +60,22 @@ class WYNDProxy:
                     while True:
                         data = client_sock.recv(4096)
                         if not data:
+                            print("No data from browser, breaking")
                             break
+                        print(f"Sending {len(data)} bytes to server")
                         self.server_conn.sendall(struct.pack('!H', len(data)) + data)
                         
+                        print("Waiting for response...")
                         resp_data = self.server_conn.recv(2)
+                        if not resp_data:
+                            print("No response from server")
+                            break
                         resp_len = struct.unpack('!H', resp_data)[0]
+                        print(f"Response length: {resp_len}")
                         if resp_len > 0:
                             resp = self.server_conn.recv(resp_len)
                             client_sock.send(resp)
+                            print(f"Sent {len(resp)} bytes to browser")
         except Exception as e:
             print(f"Error: {e}")
         finally:
